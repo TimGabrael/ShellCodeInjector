@@ -6,6 +6,12 @@ typedef void* PVOID;
 typedef void* LPVOID;
 typedef char BYTE;
 typedef unsigned long ULONG;
+typedef unsigned short WORD;
+typedef long LONG;
+typedef unsigned long DWORD;
+typedef unsigned long long ULONGLONG;
+typedef DWORD* PDWORD;
+typedef WORD* PWORD;
 
 #pragma comment(linker, "/merge:.rdata=.text")
 
@@ -61,6 +67,98 @@ typedef struct _LDR_DATA_TABLE_ENTRY {
 } LDR_DATA_TABLE_ENTRY, * PLDR_DATA_TABLE_ENTRY;
 
 
+typedef struct _IMAGE_DOS_HEADER {      // DOS .EXE header
+    WORD   e_magic;                     // Magic number
+    WORD   e_cblp;                      // Bytes on last page of file
+    WORD   e_cp;                        // Pages in file
+    WORD   e_crlc;                      // Relocations
+    WORD   e_cparhdr;                   // Size of header in paragraphs
+    WORD   e_minalloc;                  // Minimum extra paragraphs needed
+    WORD   e_maxalloc;                  // Maximum extra paragraphs needed
+    WORD   e_ss;                        // Initial (relative) SS value
+    WORD   e_sp;                        // Initial SP value
+    WORD   e_csum;                      // Checksum
+    WORD   e_ip;                        // Initial IP value
+    WORD   e_cs;                        // Initial (relative) CS value
+    WORD   e_lfarlc;                    // File address of relocation table
+    WORD   e_ovno;                      // Overlay number
+    WORD   e_res[4];                    // Reserved words
+    WORD   e_oemid;                     // OEM identifier (for e_oeminfo)
+    WORD   e_oeminfo;                   // OEM information; e_oemid specific
+    WORD   e_res2[10];                  // Reserved words
+    LONG   e_lfanew;                    // File address of new exe header
+} IMAGE_DOS_HEADER, * PIMAGE_DOS_HEADER;
+
+typedef struct _IMAGE_FILE_HEADER {
+    WORD    Machine;
+    WORD    NumberOfSections;
+    DWORD   TimeDateStamp;
+    DWORD   PointerToSymbolTable;
+    DWORD   NumberOfSymbols;
+    WORD    SizeOfOptionalHeader;
+    WORD    Characteristics;
+} IMAGE_FILE_HEADER, * PIMAGE_FILE_HEADER;
+
+typedef struct _IMAGE_DATA_DIRECTORY {
+    DWORD   VirtualAddress;
+    DWORD   Size;
+} IMAGE_DATA_DIRECTORY, * PIMAGE_DATA_DIRECTORY;
+
+typedef struct _IMAGE_EXPORT_DIRECTORY {
+    DWORD   Characteristics;
+    DWORD   TimeDateStamp;
+    WORD    MajorVersion;
+    WORD    MinorVersion;
+    DWORD   Name;
+    DWORD   Base;
+    DWORD   NumberOfFunctions;
+    DWORD   NumberOfNames;
+    DWORD   AddressOfFunctions;     // RVA from base of image
+    DWORD   AddressOfNames;         // RVA from base of image
+    DWORD   AddressOfNameOrdinals;  // RVA from base of image
+} IMAGE_EXPORT_DIRECTORY, * PIMAGE_EXPORT_DIRECTORY;
+
+typedef struct _IMAGE_OPTIONAL_HEADER64 {
+    WORD        Magic;
+    BYTE        MajorLinkerVersion;
+    BYTE        MinorLinkerVersion;
+    DWORD       SizeOfCode;
+    DWORD       SizeOfInitializedData;
+    DWORD       SizeOfUninitializedData;
+    DWORD       AddressOfEntryPoint;
+    DWORD       BaseOfCode;
+    ULONGLONG   ImageBase;
+    DWORD       SectionAlignment;
+    DWORD       FileAlignment;
+    WORD        MajorOperatingSystemVersion;
+    WORD        MinorOperatingSystemVersion;
+    WORD        MajorImageVersion;
+    WORD        MinorImageVersion;
+    WORD        MajorSubsystemVersion;
+    WORD        MinorSubsystemVersion;
+    DWORD       Win32VersionValue;
+    DWORD       SizeOfImage;
+    DWORD       SizeOfHeaders;
+    DWORD       CheckSum;
+    WORD        Subsystem;
+    WORD        DllCharacteristics;
+    ULONGLONG   SizeOfStackReserve;
+    ULONGLONG   SizeOfStackCommit;
+    ULONGLONG   SizeOfHeapReserve;
+    ULONGLONG   SizeOfHeapCommit;
+    DWORD       LoaderFlags;
+    DWORD       NumberOfRvaAndSizes;
+    IMAGE_DATA_DIRECTORY DataDirectory[16];
+} IMAGE_OPTIONAL_HEADER64, * PIMAGE_OPTIONAL_HEADER64;
+
+typedef struct _IMAGE_NT_HEADERS64 {
+    DWORD Signature;
+    IMAGE_FILE_HEADER FileHeader;
+    IMAGE_OPTIONAL_HEADER64 OptionalHeader;
+} IMAGE_NT_HEADERS64, * PIMAGE_NT_HEADERS64;
+typedef PIMAGE_NT_HEADERS64 PIMAGE_NT_HEADERS;
+
+
 static bool IsSameCaseInsensitive(const wchar_t* c1, const wchar_t* c2)
 {
     if ((c1 && !c2) || (!c1 && c2)) return false;
@@ -96,6 +194,45 @@ static bool IsSameCaseInsensitive(const wchar_t* c1, const wchar_t* c2)
     return isSame;
 }
 
+static bool StringCompare(const char* c1, const char* c2, int max)
+{
+    if ((c1 && !c2) || (!c1 && c2)) return false;
+    if (c1 == c2) return true;
+
+    bool isSame = true;
+    int curIdx = 0;
+    while (curIdx < max)
+    {
+        if (c1[curIdx] != c2[curIdx])
+        {
+            if (c1[curIdx] == '\00' || c2[curIdx] == '\00') {
+                return false;
+            }
+            wchar_t otherCase = c1[curIdx];
+            if (otherCase < 'a' && 'A' <= otherCase)
+            {
+                otherCase = otherCase + ('a' - 'A');
+            }
+            else
+            {
+                otherCase = otherCase - ('a' - 'A');
+            }
+            if (otherCase != c2[curIdx])
+            {
+                isSame = false;
+                break;
+            }
+        }
+        else if (c1[curIdx] == '\00')
+        {
+            break;
+        }
+        curIdx++;
+    }
+    return isSame;
+}
+
+
 static PVOID GetModuleBaseAddress(const wchar_t* dll)
 {
     _PEB* peb = (_PEB*)__readgsqword(0x60);
@@ -123,11 +260,59 @@ static PVOID GetModuleBaseAddress(const wchar_t* dll)
     return nullptr;
 }
 
-
-
-
-extern "C" PVOID _code()
+static PVOID GetProcAddress(const wchar_t* dll, const char* funcName)
 {
-    return GetModuleBaseAddress(L"KernelBase.dll");
-    //return x * y + (x + y);
+    IMAGE_DOS_HEADER* image = (IMAGE_DOS_HEADER*)GetModuleBaseAddress(dll);
+    if (!image) return nullptr;
+
+    PIMAGE_NT_HEADERS header = (PIMAGE_NT_HEADERS)((BYTE*)image + ((PIMAGE_DOS_HEADER)image)->e_lfanew);
+
+    PIMAGE_EXPORT_DIRECTORY exports = (PIMAGE_EXPORT_DIRECTORY)((BYTE*)image + header->OptionalHeader.DataDirectory[0].VirtualAddress);
+
+    PDWORD names = (PDWORD)((BYTE*)image + exports->AddressOfNames);
+    PWORD ordinals = (PWORD)((BYTE*)image + exports->AddressOfNameOrdinals);
+
+    PDWORD funcs = (PDWORD)((BYTE*)image + exports->AddressOfFunctions);
+
+    for (int i = 0; i < exports->NumberOfNames; i++)
+    {
+        char* fName = (char*)((BYTE*)image + names[i]);
+        if (StringCompare(fName, funcName, 1000))
+        {
+            return (PVOID)((BYTE*)image + funcs[ordinals[i]]);
+        }
+    }
+
+    return nullptr;
+}
+
+static PVOID GetProcFromIndex(const wchar_t* dll, int idx)
+{
+    IMAGE_DOS_HEADER* image = (IMAGE_DOS_HEADER*)GetModuleBaseAddress(dll);
+    if (!image) return nullptr;
+    
+    PIMAGE_NT_HEADERS header = (PIMAGE_NT_HEADERS)((BYTE*)image + ((PIMAGE_DOS_HEADER)image)->e_lfanew);
+
+    PIMAGE_EXPORT_DIRECTORY exports = (PIMAGE_EXPORT_DIRECTORY)((BYTE*)image + header->OptionalHeader.DataDirectory[0].VirtualAddress);
+
+    PDWORD funcs = (PDWORD)((BYTE*)image + exports->AddressOfFunctions);
+
+    if(idx < exports->NumberOfFunctions && idx >= 0) return (PVOID)((BYTE*)image + funcs[idx]);
+    return nullptr;
+}
+
+
+extern "C" PVOID _code(const char* idx)
+{
+    return GetProcAddress(L"KernelBase.dll", idx);
+    //IMAGE_DOS_HEADER* image = (IMAGE_DOS_HEADER*)GetModuleBaseAddress(L"KernelBase.dll");
+    //
+    //PIMAGE_NT_HEADERS header = (PIMAGE_NT_HEADERS)((BYTE*)image + ((PIMAGE_DOS_HEADER)image)->e_lfanew);
+    //
+    //PIMAGE_EXPORT_DIRECTORY exports = (PIMAGE_EXPORT_DIRECTORY)((BYTE*)image + header->OptionalHeader.DataDirectory[0].VirtualAddress);
+    //
+    //BYTE** names = (BYTE**)((BYTE*)image + exports->AddressOfNames);
+    //void** funcs = (void**)((BYTE*)image + exports->AddressOfFunctions);
+    //
+    //return (void*)((BYTE*)image + (int)funcs[1]);
 }

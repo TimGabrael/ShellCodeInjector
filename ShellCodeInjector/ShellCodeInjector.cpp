@@ -51,7 +51,7 @@ unsigned char _code_raw[] = {
 	 0xE1, 0x11, 0x00, 0x00, 0xE4, 0x11,
 };
 
-typedef void* (_stdcall*PFUNC)();
+typedef void* (_stdcall*PFUNC)(const char*);
 
 PFUNC MapFunction(const char* fileName, const char* functionName)
 {
@@ -64,7 +64,7 @@ PFUNC MapFunction(const char* fileName, const char* functionName)
 	IMAGE_DOS_HEADER dosHeader = { 0 };
 	fread(&dosHeader, sizeof(dosHeader), 1, f);
 	fseek(f, dosHeader.e_lfanew, SEEK_SET);
-
+	
 	IMAGE_NT_HEADERS ntHeader = { 0 };
 	fread(&ntHeader, sizeof(ntHeader), 1, f);
 
@@ -125,13 +125,22 @@ PFUNC MapFunction(const char* fileName, const char* functionName)
 }
 
 
+
 int main()
 {
 	PFUNC res = MapFunction("ShellCode1", "_code");
 	if (res)
 	{
-		void* out = res();
-		printf("result: %p\n", out);
+		//for (int i = 0; i < 4000; i++)
+		{
+			const char* lookingFor = "AccessCheck";
+			void* out = (PIMAGE_EXPORT_DIRECTORY)res(lookingFor);
+			void* addr = GetProcAddress(GetModuleHandle(L"KERNELBASE.dll"), lookingFor);
+			
+			intptr_t diff = (intptr_t)out - (intptr_t)addr;
+			printf("%p, addr %p, diff %p\n", out, addr, diff);
+
+		}
 	}
 	system("pause");
 }
