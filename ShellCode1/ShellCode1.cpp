@@ -302,17 +302,19 @@ static PVOID GetProcFromIndex(const wchar_t* dll, int idx)
 }
 
 
-extern "C" PVOID _code(const char* idx)
+// for debug purposes
+typedef void(__stdcall*PRINTFUNC)(const char*);
+PRINTFUNC external_printf = nullptr;
+void printf(const char* str)
 {
+    external_printf(str);
+}
+
+
+
+extern "C" PVOID _code(PRINTFUNC f, const char* idx)
+{
+    external_printf = f;
+
     return GetProcAddress(L"KernelBase.dll", idx);
-    //IMAGE_DOS_HEADER* image = (IMAGE_DOS_HEADER*)GetModuleBaseAddress(L"KernelBase.dll");
-    //
-    //PIMAGE_NT_HEADERS header = (PIMAGE_NT_HEADERS)((BYTE*)image + ((PIMAGE_DOS_HEADER)image)->e_lfanew);
-    //
-    //PIMAGE_EXPORT_DIRECTORY exports = (PIMAGE_EXPORT_DIRECTORY)((BYTE*)image + header->OptionalHeader.DataDirectory[0].VirtualAddress);
-    //
-    //BYTE** names = (BYTE**)((BYTE*)image + exports->AddressOfNames);
-    //void** funcs = (void**)((BYTE*)image + exports->AddressOfFunctions);
-    //
-    //return (void*)((BYTE*)image + (int)funcs[1]);
 }
