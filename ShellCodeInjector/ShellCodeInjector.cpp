@@ -1,6 +1,9 @@
 #include <iostream>
 #include <Windows.h>
+#include <fstream>
+#include <sstream>
 
+// GetModuleHandle(L"KERNELBASE.dll");
 unsigned char _code_raw[] = {
 	 0x4B, 0x00, 0x65, 0x00, 0x72, 0x00, 0x6E, 0x00, 0x65, 0x00, 0x6C, 0x00,
 	 0x42, 0x00, 0x61, 0x00, 0x73, 0x00, 0x65, 0x00, 0x2E, 0x00, 0x64, 0x00,
@@ -45,17 +48,90 @@ unsigned char _code_raw[] = {
 	 0xC3, 0xCC, 0xCC, 0xCC, 0x01, 0x23, 0x07, 0x00, 0x23, 0x34, 0x02, 0x00,
 	 0x0B, 0x64, 0x04, 0x00, 0x0B, 0x54, 0x03, 0x00, 0x0B, 0x70, 0x00, 0x00,
 	 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x11, 0x00, 0x00,
-	 0xE1, 0x11, 0x00, 0x00, 0xE4, 0x11
-
+	 0xE1, 0x11, 0x00, 0x00, 0xE4, 0x11,
 };
 
-typedef void*(*_code_t)(int, int);
+typedef void* (_stdcall*PFUNC)();
+
+PFUNC MapFunction(const char* fileName, const char* functionName)
+{
+	std::string dllFile = std::string(fileName) + ".dll";
+	std::string mapFile = std::string(fileName) + ".map";
+	FILE* f = NULL;
+	errno_t err = fopen_s(&f, dllFile.c_str(), "rb");
+	if (!f || err) return nullptr;
+
+	IMAGE_DOS_HEADER dosHeader = { 0 };
+	fread(&dosHeader, sizeof(dosHeader), 1, f);
+	fseek(f, dosHeader.e_lfanew, SEEK_SET);
+
+	IMAGE_NT_HEADERS ntHeader = { 0 };
+	fread(&ntHeader, sizeof(ntHeader), 1, f);
+
+	IMAGE_SECTION_HEADER secHeader = { 0 };
+
+	for (int i = 0; i < ntHeader.FileHeader.NumberOfSections; i++)
+	{
+		fread(&secHeader, sizeof secHeader, 1, f);
+		if (strncmp((const char*)secHeader.Name, ".text", 8) == 0)
+		{
+			uint8_t* raw_data = new uint8_t[secHeader.SizeOfRawData];
+			fseek(f, secHeader.PointerToRawData, SEEK_SET);
+			fread(raw_data, secHeader.SizeOfRawData, 1, f);
+			fclose(f);
+
+			DWORD old_flag;
+			VirtualProtect(raw_data, secHeader.SizeOfRawData, PAGE_EXECUTE_READWRITE, &old_flag);
+
+			std::ifstream stream(mapFile.c_str());
+			if (!stream.is_open()) return nullptr;
+
+			std::string prevElement;
+			std::string element;
+			uintptr_t base = 0x0;
+			uintptr_t code_start = 0;
+			while (stream >> element)
+			{
+				if (!base)
+				{
+					if (element == "Start")
+					{
+						std::stringstream ss;
+						ss << prevElement;
+						ss >> std::hex >> base;
+					}
+				}
+				else if (!code_start)
+				{
+					if (prevElement == functionName)
+					{
+						std::stringstream ss;
+						ss << element;
+						ss >> std::hex >> code_start;
+					}
+				}
+				else break;
+				prevElement = element;
+			}
+
+			uintptr_t start = code_start - base - 0x1000;
+			return (PFUNC)(raw_data + start);
+		}
+	}
+
+	fclose(f);
+
+	return nullptr;
+}
+
 
 int main()
 {
-    DWORD old_flag;
-    VirtualProtect(_code_raw, sizeof _code_raw, PAGE_EXECUTE_READWRITE, &old_flag);
-    _code_t fn_code = (_code_t)(void*)(_code_raw + 0x110);
-    int x = 500; int y = 1200;
-    printf("Result of function : %p\n", fn_code(x, y));
+	PFUNC res = MapFunction("ShellCode1", "_code");
+	if (res)
+	{
+		void* out = res();
+		printf("result: %p\n", out);
+	}
+	system("pause");
 }

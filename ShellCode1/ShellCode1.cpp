@@ -125,13 +125,8 @@ static PVOID GetModuleBaseAddress(const wchar_t* dll)
 
 
 
-//extern "C" bool _code()
-//{
-//    return GetModuleBaseAddress(L"KernelBase.dll");
-//    return true;
-//}
 
-extern "C" PVOID _code(int x, int y)
+extern "C" PVOID _code()
 {
     return GetModuleBaseAddress(L"KernelBase.dll");
     //return x * y + (x + y);
