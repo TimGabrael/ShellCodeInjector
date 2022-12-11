@@ -167,16 +167,16 @@ PFUNC MapFunction(const char* fileName, const char* functionName)
 }
 
 
-static constexpr size_t functionIdx = 250;
+static constexpr size_t functionIdx = 251;
 static constexpr uint8_t safe_cpu_state_on_stack[] = {
 	0x50,											//					,push rax
 	0x48, 0x89, 0xE0,								//					,mov rax,rsp
 	0x48, 0x81, 0xEC, 0x90, 0x01, 0x00, 0x00,		//					,sub rsp,0x190
-	0x83, 0xE4, 0xF7,								//					,and esp,~8
+	0x48, 0x83, 0xE4, 0xF7,							//					,and rsp,~8
 	0x48, 0x89, 0x5C, 0x24, 0x08,					//					,mov [rsp+0x8],rbx
 	0x48, 0x8B, 0x18,								//					,mov rbx,[rax]
 	0x48, 0x89, 0x1C, 0x24,							//					,mov [rsp],rbx
-	0x48, 0x83, 0xC0, 0x04,							//					,add rax,4
+	0x48, 0x83, 0xC0, 0x08,							//					,add rax,8
 	0x48, 0x89, 0x44, 0x24, 0x38,					//					,mov [rsp+0x38],rax
 	0x48, 0x89, 0xE0,								//					,mov rax,rsp
 	0x48, 0x89, 0x48, 0x10,							//					,mov [rax+0x10],rcx
@@ -254,13 +254,6 @@ static constexpr uint8_t safe_cpu_state_on_stack[] = {
 	0x59,											//					,pop rcx
 	0x48,0x8B,0x00,									//					,mov rax,[rax]
 };
-//0x90, 0x90, 0x90, 0x90,							//					,nop
-//0x90, 0x90, 0x90, 0x90,							//					,nop
-//0x90, 0x90, 0x90, 0x90,							//					,nop
-//0x90, 0x90, 0x90, 0x90,							//					,nop
-//0x90, 0x90, 0x90, 0x90,							//					,nop
-//0x90, 0x90, 0x90, 0x90,							//					,nop
-//0xE9, 0x00, 0x00, 0x00, 0x00,						//					,jmp -> null
 
 struct ShellCode
 {
@@ -385,6 +378,11 @@ bool ShellCodeHookEx(HANDLE procHandle, uintptr_t hookAddr, const ShellCode& cod
 {
 	if (procHandle == 0) return false;
 
+	DWORD old;
+	BOOL setProtection = VirtualProtectEx(procHandle, (LPVOID)hookAddr, overwrite, PAGE_EXECUTE_READWRITE, &old);
+	if (!setProtection) return false;
+
+
 	uintptr_t trampLoc = 0;
 	uintptr_t cur = hookAddr + 0x1000;
 	while (!trampLoc)
@@ -396,6 +394,8 @@ bool ShellCodeHookEx(HANDLE procHandle, uintptr_t hookAddr, const ShellCode& cod
 	}
 	if (!trampLoc) return false;
 
+	printf("tramp/hook: %p %p\n", trampLoc, hookAddr);
+
 	int jmpBack = (hookAddr - cur - sizeof(safe_cpu_state_on_stack) - 5);
 	int jmpTo = (cur - hookAddr - 5);
 
@@ -403,8 +403,16 @@ bool ShellCodeHookEx(HANDLE procHandle, uintptr_t hookAddr, const ShellCode& cod
 	BOOL written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, safe_cpu_state_on_stack, sizeof(safe_cpu_state_on_stack), &numWritten); trampLoc += sizeof(safe_cpu_state_on_stack);
 	if (!written || numWritten != sizeof(safe_cpu_state_on_stack)) return false;
 
-	written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, (LPVOID)hookAddr, overwrite, &numWritten); trampLoc += overwrite;
+
+	uint8_t* overwriteData = new uint8_t[overwrite];
+	written = ReadProcessMemory(procHandle, (LPCVOID)hookAddr, overwriteData, overwrite, &numWritten);
 	if (!written || numWritten != overwrite) return false;
+
+	written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, (LPVOID)overwriteData, overwrite, &numWritten); trampLoc += overwrite;
+	if (!written || numWritten != overwrite) return false;
+
+	delete[] overwriteData;
+
 
 	uint8_t data[5] = {
 		0xE9, 0,0,0,0
@@ -417,20 +425,19 @@ bool ShellCodeHookEx(HANDLE procHandle, uintptr_t hookAddr, const ShellCode& cod
 
 	written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, code.data, code.size, &numWritten); trampLoc += code.size;
 	if (!written || numWritten != code.size) return false;
-
+	
 	const uintptr_t shellCodeStart = (uintptr_t)code.function - (uintptr_t)code.data + cur + sizeof(safe_cpu_state_on_stack) + 5 + overwrite;
 	written = WriteProcessMemory(procHandle, (LPVOID)(cur + functionIdx), &shellCodeStart, sizeof(uintptr_t), &numWritten);
 	if (!written || numWritten != sizeof(PFUNC)) return false;
 
 
-
-	DWORD old;
-	BOOL setProtection = VirtualProtectEx(procHandle, (LPVOID)hookAddr, overwrite, PAGE_EXECUTE_READWRITE, &old);
-	if (!setProtection) return false;
-
+	uint8_t* inlineJump = new uint8_t[overwrite];
+	memset(inlineJump, 0x90, overwrite);
 	*(int*)&data[1] = jmpTo;
-	written = WriteProcessMemory(procHandle, (LPVOID)hookAddr, data, 5, &numWritten);
-	if (!written || numWritten != 5) return false;
+	memcpy(inlineJump, data, 5);
+	written = WriteProcessMemory(procHandle, (LPVOID)hookAddr, inlineJump, overwrite, &numWritten);
+	if (!written || numWritten != overwrite) return false;
+	delete[] inlineJump;
 
 	VirtualProtectEx(procHandle, (LPVOID)hookAddr, overwrite, old, &old);
 
@@ -449,7 +456,7 @@ HANDLE GetProcess(const wchar_t* exeFileName)
 	{
 		while (Process32Next(snapshot, &entry) == TRUE)
 		{
-			if (wcsncmp(entry.szExeFile, exeFileName, 500) == 0)
+			if (!_wcsicmp(entry.szExeFile, exeFileName))
 			{
 				return OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID);
 			}
@@ -460,7 +467,7 @@ HANDLE GetProcess(const wchar_t* exeFileName)
 	return 0;
 }
 
-DWORD GetProcId(const wchar_t* procName) {
+DWORD GetProcId(const wchar_t* exeFileName) {
 	DWORD procId = 0;
 	HANDLE hSnap = (CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
 	if (hSnap != INVALID_HANDLE_VALUE) {
@@ -469,7 +476,7 @@ DWORD GetProcId(const wchar_t* procName) {
 
 		if (Process32First(hSnap, &procEntry)) {
 			do {
-				if (!_wcsicmp(procEntry.szExeFile, procName)) {
+				if (!_wcsicmp(procEntry.szExeFile, exeFileName)) {
 					procId = procEntry.th32ProcessID;
 					break;
 				}
@@ -503,16 +510,24 @@ uintptr_t GetModuleBaseAddress(DWORD procId, const wchar_t* modName) {
 int main()
 {
 	ShellCode res = GetShellCode("ShellCode1", "_code");
-	
+	const wchar_t* target = L"sr_hv.exe";
+
 	if (res.data && res.function && res.size > 0)
 	{
-		uintptr_t moduleBase = GetModuleBaseAddress(GetProcId(L"process"), L"module");
+		DWORD procID = GetProcId(target);
+		uintptr_t moduleBase = GetModuleBaseAddress(procID, target);
+	
+		HANDLE procHandle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, procID);
 
-		bool worked = ShellCodeHookEx(GetProcess(L"ExeFile"), (uintptr_t)GetShellCode, res, 10);
+		printf("procHandle: %p\n", procHandle);
+		uintptr_t hookLocation = moduleBase + 0x699412;
+		bool worked = ShellCodeHookEx(procHandle, hookLocation, res, 6);
 		if (!worked)
 		{
 			printf("DID NOT WORK\n");
 		}
+
+		CloseHandle(procHandle);
 	}
 
 	system("pause");

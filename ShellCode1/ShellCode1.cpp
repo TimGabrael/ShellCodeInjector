@@ -364,5 +364,6 @@ static PVOID GetProcFromIndex(const wchar_t* dll, int idx)
 
 extern "C" CPU_STATE* _code(CPU_STATE* state)
 {
+    *(uintptr_t*)state->rbx = 40;
     return state;
 }
