@@ -589,9 +589,9 @@ int main()
 	
 		HANDLE procHandle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, procID);
 
-		printf("procHandle: %p\n", procHandle);
-		uintptr_t hookLocation = moduleBase + 0x699412;
-		bool worked = ShellCodeHookEx(procHandle, hookLocation, res, 6);
+		//uintptr_t hookLocation = moduleBase + 0x699412;
+		uintptr_t hookLocation = moduleBase + 0x6871CE;
+		bool worked = ShellCodeHookEx(procHandle, hookLocation, res, 7);
 		if (!worked)
 		{
 			printf("DID NOT WORK\n");

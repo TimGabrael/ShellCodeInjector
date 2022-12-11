@@ -362,19 +362,67 @@ static PVOID GetProcFromIndex(const wchar_t* dll, int idx)
 
 // USER32.dll
 #define GET_ASYNC_KEYSTATE_OFFSET 0x23EA0
+#define GET_DC_OFFSET 0x26170
+#define GET_FOREGROUND_WINDOW_OFFSET 0x33F70
+#define GET_WINDOW_RECT_OFFSET 0x146E0
 
+// GDI32.dll
+#define DRAW_TEXT_OFFSET 0xDB50
+
+struct RECT
+{
+    int left, top, right, bottom;
+};
+
+typedef PVOID(*PFGetDC)(PVOID);
+typedef PVOID(*PFGetForegroundWindow)();
+typedef bool(*PFGetWindowRect)(PVOID hWnd, RECT* r);
+//ExtTextOutA
+typedef bool (*PFDrawText)(PVOID, int,int, unsigned int, const RECT*, const char*, unsigned int, const int*);
+
+struct GlobalData
+{
+    PVOID mod;
+    PVOID user32;
+    PVOID gdi32;
+    PVOID hdc;
+    PFGetDC getDC;
+    PFDrawText drawText;
+    PFGetForegroundWindow getForegroundWindow;
+    PFGetWindowRect getWindowRect;
+};
 
 #pragma section(".text")
-__declspec(allocate(".text")) volatile int counter = 0;
+__declspec(allocate(".text")) volatile GlobalData globals = { 0 };
+
+
 
 extern "C" CPU_STATE* _code(CPU_STATE* state)
 {
-    if (counter > 10)
+    if (!globals.mod)
     {
-        *(uintptr_t*)state->rbx = 40;
+        globals.mod = GetModuleBaseAddress(L"sr_hv.exe");
+        globals.user32 = GetModuleBaseAddress(L"user32.dll");
+        globals.gdi32 = GetModuleBaseAddress(L"GDI32.dll");
+
+        globals.getDC = (PFGetDC)((uintptr_t)globals.user32 + GET_DC_OFFSET);
+        globals.getForegroundWindow = (PFGetForegroundWindow)((uintptr_t)globals.user32 + GET_FOREGROUND_WINDOW_OFFSET);
+        globals.getWindowRect = (PFGetWindowRect)((uintptr_t)globals.user32 + GET_WINDOW_RECT_OFFSET);
+        globals.drawText = (PFDrawText)((uintptr_t)globals.gdi32 + DRAW_TEXT_OFFSET);
+
+
+        globals.hdc = globals.getDC(NULL);
+
+
     }
 
-    counter += 1;
+    globals.drawText(globals.getDC(globals.getForegroundWindow()), 100, 100, 0, nullptr, "THIS COULD BE ANYTHING", 23, nullptr);
+
+    if (state->rbx)
+    {
+        int* ammo = (int*)((uintptr_t)state->rbx + 0x1E4);
+        *ammo = 99;
+    }
 
     return state;
 }
