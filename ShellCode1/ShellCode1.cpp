@@ -359,6 +359,7 @@ static PVOID GetProcFromIndex(const wchar_t* dll, int idx)
 #define PLAYER_POSITION 0x1DF62A0
 #define PLAYER_CAMERA_YAW 0x1909764
 #define PLAYER_CAMERA_PITCH 0x1909784
+#define PLAYER_ACTIVE_WEAPON 0x67C7EE0
 
 // USER32.dll
 #define GET_ASYNC_KEYSTATE_OFFSET 0x23EA0
@@ -418,9 +419,10 @@ extern "C" CPU_STATE* _code(CPU_STATE* state)
 
     globals.drawText(globals.getDC(globals.getForegroundWindow()), 100, 100, 0, nullptr, "THIS COULD BE ANYTHING", 23, nullptr);
 
-    if (state->rbx)
+    uintptr_t activeWeapon = *(uintptr_t*)((uintptr_t)globals.mod + PLAYER_ACTIVE_WEAPON);
+    if (activeWeapon)
     {
-        int* ammo = (int*)((uintptr_t)state->rbx + 0x1E4);
+        int* ammo = (int*)(activeWeapon + 0x1E4);
         *ammo = 99;
     }
 
