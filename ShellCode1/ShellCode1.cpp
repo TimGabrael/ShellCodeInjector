@@ -159,6 +159,59 @@ typedef struct _IMAGE_NT_HEADERS64 {
 typedef PIMAGE_NT_HEADERS64 PIMAGE_NT_HEADERS;
 
 
+
+
+
+
+
+#define F_REG_DEF(reg) float reg##_0; float reg##_1; float reg##_2; float reg##_3
+struct FLOAT_REGISTERS
+{
+    F_REG_DEF(xmm0);
+    F_REG_DEF(xmm1);
+    F_REG_DEF(xmm2);
+    F_REG_DEF(xmm3);
+    F_REG_DEF(xmm4);
+    F_REG_DEF(xmm5);
+    F_REG_DEF(xmm6);
+    F_REG_DEF(xmm7);
+    F_REG_DEF(xmm8);
+    F_REG_DEF(xmm9);
+    F_REG_DEF(xmm10);
+    F_REG_DEF(xmm11);
+    F_REG_DEF(xmm12);
+    F_REG_DEF(xmm13);
+    F_REG_DEF(xmm14);
+    F_REG_DEF(xmm15);
+};
+struct CPU_STATE
+{
+    void* rax;
+    void* rbx;
+    void* rcx;
+    void* rdx;
+    void* rsi;
+    void* rdi;
+    void* rbp;
+    void* rsp;
+    void* r8;
+    void* r9;
+    void* r10;
+    void* r11;
+    void* r12;
+    void* r13;
+    void* r14;
+    void* r15;
+    FLOAT_REGISTERS f_regs;
+    void* flags;
+};
+
+
+
+
+
+
+
 static bool IsSameCaseInsensitive(const wchar_t* c1, const wchar_t* c2)
 {
     if ((c1 && !c2) || (!c1 && c2)) return false;
@@ -260,6 +313,7 @@ static PVOID GetModuleBaseAddress(const wchar_t* dll)
     return nullptr;
 }
 
+
 static PVOID GetProcAddress(const wchar_t* dll, const char* funcName)
 {
     IMAGE_DOS_HEADER* image = (IMAGE_DOS_HEADER*)GetModuleBaseAddress(dll);
@@ -302,19 +356,13 @@ static PVOID GetProcFromIndex(const wchar_t* dll, int idx)
 }
 
 
-// for debug purposes
-typedef void(__stdcall*PRINTFUNC)(const char*);
-PRINTFUNC external_printf = nullptr;
-void printf(const char* str)
+
+
+
+
+
+
+extern "C" CPU_STATE* _code(CPU_STATE* state)
 {
-    external_printf(str);
-}
-
-
-
-extern "C" PVOID _code(PRINTFUNC f, const char* idx)
-{
-    external_printf = f;
-
-    return GetProcAddress(L"KernelBase.dll", idx);
+    return state;
 }
