@@ -357,15 +357,24 @@ static PVOID GetProcFromIndex(const wchar_t* dll, int idx)
 
 
 #define PLAYER_POSITION 0x1DF62A0
+#define PLAYER_CAMERA_YAW 0x1909764
+#define PLAYER_CAMERA_PITCH 0x1909784
 
 // USER32.dll
 #define GET_ASYNC_KEYSTATE_OFFSET 0x23EA0
 
 
-
+#pragma section(".text")
+__declspec(allocate(".text")) volatile int counter = 0;
 
 extern "C" CPU_STATE* _code(CPU_STATE* state)
 {
-    *(uintptr_t*)state->rbx = 40;
+    if (counter > 10)
+    {
+        *(uintptr_t*)state->rbx = 40;
+    }
+
+    counter += 1;
+
     return state;
 }

@@ -23,3 +23,7 @@ These are:<br>
 16. Linker > Advanced > No Entry Point: Yes (/NOENTRY)
 17. #pragma comment(linker, "/merge:.rdata=.text")
 
+additionally the Shellcode needs to specify global variables with:<br>
+#pragma section(".text") // declare the text section somewhere <br>
+__declspec(allocate(".text")) int example_imm_integer = 0; // allocate immutable integer in text section<br>
+__declspec(allocate(".text")) volatile int example_mut_integer = 0; // allocate mutable integer in text section<br>
