@@ -340,7 +340,7 @@ ShellCode GetShellCode(const char* fileName, const char* functionName)
 	return output;
 }
 
-void ShellcodeHook(uintptr_t hookAddr, const ShellCode& code, int overwrite)
+void ShellCodeHook(uintptr_t hookAddr, const ShellCode& code, int overwrite)
 {
 	uintptr_t trampLoc = 0;
 	uintptr_t cur = hookAddr + 0x1000;
@@ -352,8 +352,7 @@ void ShellcodeHook(uintptr_t hookAddr, const ShellCode& code, int overwrite)
 		else cur = addr + 0x1000;
 	}
 	if (!trampLoc) return;
-	cur = trampLoc;
-
+	
 	int jmpBack = (hookAddr - cur - sizeof(safe_cpu_state_on_stack) - 5);
 	int jmpTo = (cur - hookAddr - 5);
 
@@ -381,17 +380,71 @@ void ShellcodeHook(uintptr_t hookAddr, const ShellCode& code, int overwrite)
 	VirtualProtect((LPVOID)hookAddr, overwrite, old, &old);
 }
 
-void ShellCodeHookEx(HANDLE procHandle, uintptr_t hookAddr, const ShellCode& code, int overwrite)
+bool ShellCodeHookEx(HANDLE procHandle, uintptr_t hookAddr, const ShellCode& code, int overwrite)
 {
+	uintptr_t trampLoc = 0;
+	uintptr_t cur = hookAddr + 0x1000;
+	while (!trampLoc)
+	{
+		uintptr_t addr = cur;
+		cur = (uintptr_t)VirtualAllocEx(procHandle, (LPVOID)addr, code.size + sizeof(safe_cpu_state_on_stack) + overwrite + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+		if (cur) trampLoc = cur;
+		else cur = addr + 0x1000;
+	}
+	if (!trampLoc) return false;
 
+	int jmpBack = (hookAddr - cur - sizeof(safe_cpu_state_on_stack) - 5);
+	int jmpTo = (cur - hookAddr - 5);
+
+	SIZE_T numWritten = 0;
+	BOOL written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, safe_cpu_state_on_stack, sizeof(safe_cpu_state_on_stack), &numWritten); trampLoc += sizeof(safe_cpu_state_on_stack);
+	if (!written || numWritten != sizeof(safe_cpu_state_on_stack)) return false;
+
+	written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, (LPVOID)hookAddr, overwrite, &numWritten); trampLoc += overwrite;
+	if (!written || numWritten != overwrite) return false;
+
+	uint8_t data[5] = {
+		0xE9, 0,0,0,0
+	};
+	*(int*)&data[1] = jmpBack;
+
+	written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, data, 5, &numWritten); trampLoc += 5;
+	if (!written || numWritten != 5) return false;
+
+
+	written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, code.data, code.size, &numWritten); trampLoc += code.size;
+	if (!written || numWritten != code.size) return false;
+
+	const uintptr_t shellCodeStart = (uintptr_t)code.function - (uintptr_t)code.data + cur + sizeof(safe_cpu_state_on_stack) + 5 + overwrite;
+	written = WriteProcessMemory(procHandle, (LPVOID)(cur + functionIdx), &shellCodeStart, sizeof(uintptr_t), &numWritten);
+	if (!written || numWritten != sizeof(PFUNC)) return false;
+
+
+
+	DWORD old;
+	BOOL setProtection = VirtualProtectEx(procHandle, (LPVOID)hookAddr, overwrite, PAGE_EXECUTE_READWRITE, &old);
+	if (!setProtection) return false;
+
+	*(int*)&data[1] = jmpTo;
+	written = WriteProcessMemory(procHandle, (LPVOID)hookAddr, data, 5, &numWritten);
+	if (!written || numWritten != 5) return false;
+
+	VirtualProtectEx(procHandle, (LPVOID)hookAddr, overwrite, old, &old);
+
+	return true;
 }
+
 
 
 int main()
 {
 	ShellCode res = GetShellCode("ShellCode1", "_code");
-
-	ShellcodeHook((uintptr_t)GetShellCode, res, 10);
+	
+	bool worked = ShellCodeHookEx(GetCurrentProcess(), (uintptr_t)GetShellCode, res, 10);
+	if (!worked)
+	{
+		printf("DID NOT WORK\n");
+	}
 
 	if (res.data && res.function && res.size > 0)
 	{
