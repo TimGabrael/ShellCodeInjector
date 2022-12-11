@@ -356,8 +356,10 @@ static PVOID GetProcFromIndex(const wchar_t* dll, int idx)
 }
 
 
+#define PLAYER_POSITION 0x1DF62A0
 
-
+// USER32.dll
+#define GET_ASYNC_KEYSTATE_OFFSET 0x23EA0
 
 
 

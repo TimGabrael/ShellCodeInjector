@@ -374,72 +374,142 @@ void ShellCodeHook(uintptr_t hookAddr, const ShellCode& code, int overwrite)
 	VirtualProtect((LPVOID)hookAddr, overwrite, old, &old);
 }
 
-bool ShellCodeHookEx(HANDLE procHandle, uintptr_t hookAddr, const ShellCode& code, int overwrite)
+bool AsmHookEx(HANDLE procHandle, uintptr_t hookAddr, const uint8_t* data, int size, int overwrite)
 {
-	if (procHandle == 0) return false;
+	if (procHandle == 0 || overwrite < 5) return false;
 
 	DWORD old;
 	BOOL setProtection = VirtualProtectEx(procHandle, (LPVOID)hookAddr, overwrite, PAGE_EXECUTE_READWRITE, &old);
 	if (!setProtection) return false;
-
 
 	uintptr_t trampLoc = 0;
 	uintptr_t cur = hookAddr + 0x1000;
 	while (!trampLoc)
 	{
 		uintptr_t addr = cur;
-		cur = (uintptr_t)VirtualAllocEx(procHandle, (LPVOID)addr, code.size + sizeof(safe_cpu_state_on_stack) + overwrite + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+		cur = (uintptr_t)VirtualAllocEx(procHandle, (LPVOID)addr, size + overwrite + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 		if (cur) trampLoc = cur;
 		else cur = addr + 0x1000;
 	}
 	if (!trampLoc) return false;
 
-	printf("tramp/hook: %p %p\n", trampLoc, hookAddr);
+	printf("hook/tramp: %p %p\n", hookAddr, trampLoc);
 
-	int jmpBack = (hookAddr - cur - sizeof(safe_cpu_state_on_stack) - 5);
+	int jmpBack = (hookAddr - cur - size - 5);
 	int jmpTo = (cur - hookAddr - 5);
 
 	SIZE_T numWritten = 0;
-	BOOL written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, safe_cpu_state_on_stack, sizeof(safe_cpu_state_on_stack), &numWritten); trampLoc += sizeof(safe_cpu_state_on_stack);
-	if (!written || numWritten != sizeof(safe_cpu_state_on_stack)) return false;
+	BOOL written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, data, size, &numWritten); trampLoc += size;
+	if (!written || numWritten != size) return false;
 
 
 	uint8_t* overwriteData = new uint8_t[overwrite];
-	written = ReadProcessMemory(procHandle, (LPCVOID)hookAddr, overwriteData, overwrite, &numWritten);
-	if (!written || numWritten != overwrite) return false;
+	written = ReadProcessMemory(procHandle, (LPVOID)hookAddr, overwriteData, overwrite, &numWritten);
+	if (!written || numWritten != overwrite) {
+		delete[] overwriteData;
+		return false;
+	}
 
 	written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, (LPVOID)overwriteData, overwrite, &numWritten); trampLoc += overwrite;
-	if (!written || numWritten != overwrite) return false;
-
+	if (!written || numWritten != overwrite)
+	{
+		delete[] overwriteData;
+		return false;
+	}
 	delete[] overwriteData;
 
 
-	uint8_t data[5] = {
+	uint8_t dataJmp[5] = {
 		0xE9, 0,0,0,0
 	};
-	*(int*)&data[1] = jmpBack;
+	*(int*)&dataJmp[1] = jmpBack;
 
-	written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, data, 5, &numWritten); trampLoc += 5;
+	written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, dataJmp, 5, &numWritten); trampLoc += 5;
 	if (!written || numWritten != 5) return false;
-
-
-	written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, code.data, code.size, &numWritten); trampLoc += code.size;
-	if (!written || numWritten != code.size) return false;
-	
-	const uintptr_t shellCodeStart = (uintptr_t)code.function - (uintptr_t)code.data + cur + sizeof(safe_cpu_state_on_stack) + 5 + overwrite;
-	written = WriteProcessMemory(procHandle, (LPVOID)(cur + functionIdx), &shellCodeStart, sizeof(uintptr_t), &numWritten);
-	if (!written || numWritten != sizeof(PFUNC)) return false;
 
 
 	uint8_t* inlineJump = new uint8_t[overwrite];
 	memset(inlineJump, 0x90, overwrite);
-	*(int*)&data[1] = jmpTo;
-	memcpy(inlineJump, data, 5);
+	*(int*)&dataJmp[1] = jmpTo;
+	memcpy(inlineJump, dataJmp, 5);
 	written = WriteProcessMemory(procHandle, (LPVOID)hookAddr, inlineJump, overwrite, &numWritten);
 	if (!written || numWritten != overwrite) return false;
 	delete[] inlineJump;
 
 	VirtualProtectEx(procHandle, (LPVOID)hookAddr, overwrite, old, &old);
+
+	return true;
+}
+
+bool AsmHookExNoCopy(HANDLE procHandle, uintptr_t hookAddr, const uint8_t* data, int size, int overwrite)
+{
+	if (procHandle == 0 || overwrite < 5) return false;
+
+	DWORD old;
+	BOOL setProtection = VirtualProtectEx(procHandle, (LPVOID)hookAddr, overwrite, PAGE_EXECUTE_READWRITE, &old);
+	if (!setProtection) return false;
+
+	uintptr_t trampLoc = 0;
+	uintptr_t cur = hookAddr + 0x1000;
+	while (!trampLoc)
+	{
+		uintptr_t addr = cur;
+		cur = (uintptr_t)VirtualAllocEx(procHandle, (LPVOID)addr, size + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+		if (cur) trampLoc = cur;
+		else cur = addr + 0x1000;
+	}
+	if (!trampLoc) return false;
+
+	printf("hook/tramp: %p %p\n", hookAddr, trampLoc);
+
+	int jmpBack = (hookAddr - cur - size - 5);
+	int jmpTo = (cur - hookAddr - 5);
+
+	SIZE_T numWritten = 0;
+	BOOL written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, data, size, &numWritten); trampLoc += size;
+	if (!written || numWritten != size) return false;
+
+
+	uint8_t dataJmp[5] = {
+		0xE9, 0,0,0,0
+	};
+	*(int*)&dataJmp[1] = jmpBack;
+
+	written = WriteProcessMemory(procHandle, (LPVOID)trampLoc, dataJmp, 5, &numWritten); trampLoc += 5;
+	if (!written || numWritten != 5) return false;
+
+
+	uint8_t* inlineJump = new uint8_t[overwrite];
+	memset(inlineJump, 0x90, overwrite);
+	*(int*)&dataJmp[1] = jmpTo;
+	memcpy(inlineJump, dataJmp, 5);
+	written = WriteProcessMemory(procHandle, (LPVOID)hookAddr, inlineJump, overwrite, &numWritten);
+	if (!written || numWritten != overwrite) return false;
+	delete[] inlineJump;
+
+	VirtualProtectEx(procHandle, (LPVOID)hookAddr, overwrite, old, &old);
+
+	return true;
+}
+
+bool ShellCodeHookEx(HANDLE procHandle, uintptr_t hookAddr, const ShellCode& code, int overwrite)
+{
+	if (procHandle == 0 || overwrite < 5) return false;
+
+	uintptr_t shellCodeAddr = (uintptr_t)VirtualAllocEx(procHandle, nullptr, code.size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+	if (!shellCodeAddr) return false;
+
+	SIZE_T numWritten = 0;
+	BOOL written = WriteProcessMemory(procHandle, (LPVOID)shellCodeAddr, code.data, code.size, &numWritten);
+	if (!written || numWritten != code.size) return false;
+	
+	const uintptr_t shellCodeStart = (uintptr_t)code.function - (uintptr_t)code.data + shellCodeAddr;
+
+	uint8_t trampData[sizeof(safe_cpu_state_on_stack)];
+	memcpy(trampData, safe_cpu_state_on_stack, sizeof(safe_cpu_state_on_stack));
+	*(uintptr_t*)&trampData[functionIdx] = shellCodeStart;
+
+	AsmHookEx(procHandle, hookAddr, trampData, sizeof(safe_cpu_state_on_stack), overwrite);
 
 	return true;
 }
