@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <fstream>
 #include <sstream>
+#include <tlhelp32.h>
 
 #define F_REG_DEF(reg) float reg##_0; float reg##_1; float reg##_2; float reg##_3
 struct FLOAT_REGISTERS
@@ -382,6 +383,8 @@ void ShellCodeHook(uintptr_t hookAddr, const ShellCode& code, int overwrite)
 
 bool ShellCodeHookEx(HANDLE procHandle, uintptr_t hookAddr, const ShellCode& code, int overwrite)
 {
+	if (procHandle == 0) return false;
+
 	uintptr_t trampLoc = 0;
 	uintptr_t cur = hookAddr + 0x1000;
 	while (!trampLoc)
@@ -435,34 +438,82 @@ bool ShellCodeHookEx(HANDLE procHandle, uintptr_t hookAddr, const ShellCode& cod
 }
 
 
+HANDLE GetProcess(const wchar_t* exeFileName)
+{
+	PROCESSENTRY32 entry;
+	entry.dwSize = sizeof(PROCESSENTRY32);
+
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL);
+
+	if (Process32First(snapshot, &entry) == TRUE)
+	{
+		while (Process32Next(snapshot, &entry) == TRUE)
+		{
+			if (wcsncmp(entry.szExeFile, exeFileName, 500) == 0)
+			{
+				return OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID);
+			}
+		}
+	}
+
+	CloseHandle(snapshot);
+	return 0;
+}
+
+DWORD GetProcId(const wchar_t* procName) {
+	DWORD procId = 0;
+	HANDLE hSnap = (CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+	if (hSnap != INVALID_HANDLE_VALUE) {
+		PROCESSENTRY32 procEntry;
+		procEntry.dwSize = sizeof(procEntry);
+
+		if (Process32First(hSnap, &procEntry)) {
+			do {
+				if (!_wcsicmp(procEntry.szExeFile, procName)) {
+					procId = procEntry.th32ProcessID;
+					break;
+				}
+			} while (Process32Next(hSnap, &procEntry));
+		}
+	}
+	CloseHandle(hSnap);
+	return procId;
+}
+
+uintptr_t GetModuleBaseAddress(DWORD procId, const wchar_t* modName) {
+	uintptr_t modBaseAddr = 0;
+	HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, procId);
+	if (hSnap != INVALID_HANDLE_VALUE) {
+		MODULEENTRY32 modEntry;
+		modEntry.dwSize = sizeof(modEntry);
+
+		if (Module32First(hSnap, &modEntry)) {
+			do {
+				if (!_wcsicmp(modEntry.szModule, modName)) {
+					modBaseAddr = (uintptr_t)modEntry.modBaseAddr;
+					break;
+				}
+			} while (Module32Next(hSnap, &modEntry));
+		}
+	}
+	CloseHandle(hSnap);
+	return modBaseAddr;
+}
 
 int main()
 {
 	ShellCode res = GetShellCode("ShellCode1", "_code");
 	
-	bool worked = ShellCodeHookEx(GetCurrentProcess(), (uintptr_t)GetShellCode, res, 10);
-	if (!worked)
-	{
-		printf("DID NOT WORK\n");
-	}
-
 	if (res.data && res.function && res.size > 0)
 	{
-		DWORD old_flag;
-		VirtualProtect(res.data, res.size, PAGE_EXECUTE_READWRITE, &old_flag);
+		uintptr_t moduleBase = GetModuleBaseAddress(GetProcId(L"process"), L"module");
 
-		CPU_STATE whatever{};
-		CPU_STATE* newState = res.function(&whatever);
-	
-		LPVOID out = VirtualAlloc(nullptr, res.size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-		if (out)
+		bool worked = ShellCodeHookEx(GetProcess(L"ExeFile"), (uintptr_t)GetShellCode, res, 10);
+		if (!worked)
 		{
-			memcpy(out, safe_cpu_state_on_stack, res.size);
-
-			PFUNC* fn = (PFUNC*)((uintptr_t)out + functionIdx);
-			*fn = res.function;
+			printf("DID NOT WORK\n");
 		}
-
 	}
+
 	system("pause");
 }
