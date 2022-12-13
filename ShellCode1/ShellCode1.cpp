@@ -16,6 +16,7 @@ typedef WORD* PWORD;
 #pragma comment(linker, "/merge:.rdata=.text")
 
 
+
 typedef struct _UNICODE_STRING {
     USHORT Length;
     USHORT MaximumLength;
@@ -370,6 +371,33 @@ static PVOID GetProcFromIndex(const wchar_t* dll, int idx)
 // GDI32.dll
 #define DRAW_TEXT_OFFSET 0xDB50
 
+
+#define STR_MERGE_IMPL(a, b) a##b
+#define STR_MERGE(a, b) STR_MERGE_IMPL(a, b)
+#define MAKE_PAD(size) STR_MERGE(_pad, __COUNTER__)[size]
+#define DEFINE_MEMBER_N(type, name, offset) struct { unsigned char MAKE_PAD(offset); type name;}
+
+struct Vec3 { float x, y, z; };
+
+union SRWeapon
+{
+    void** vtable;
+    DEFINE_MEMBER_N(Vec3, pos, 0x60);
+    DEFINE_MEMBER_N(int, ammo, 0x1E4);   
+};
+union SRPlayer
+{
+    void** vtable;
+    DEFINE_MEMBER_N(const char*, name, 0x18);
+    DEFINE_MEMBER_N(SRWeapon*, weapon, 0x20);
+    DEFINE_MEMBER_N(Vec3, pos, 0x60);
+    DEFINE_MEMBER_N(bool, isAiming, 0x212A);
+    DEFINE_MEMBER_N(int, health, 0x2040);
+    DEFINE_MEMBER_N(uintptr_t, aimAtHash, 0x2210);
+    DEFINE_MEMBER_N(Vec3, lookAtPos, 0x2218);
+
+};
+
 struct RECT
 {
     int left, top, right, bottom;
@@ -393,9 +421,9 @@ struct GlobalData
     PFGetWindowRect getWindowRect;
 };
 
+
 #pragma section(".text")
 __declspec(allocate(".text")) volatile GlobalData globals = { 0 };
-
 
 
 extern "C" CPU_STATE* _code(CPU_STATE* state)
@@ -405,26 +433,25 @@ extern "C" CPU_STATE* _code(CPU_STATE* state)
         globals.mod = GetModuleBaseAddress(L"sr_hv.exe");
         globals.user32 = GetModuleBaseAddress(L"user32.dll");
         globals.gdi32 = GetModuleBaseAddress(L"GDI32.dll");
-
+    
         globals.getDC = (PFGetDC)((uintptr_t)globals.user32 + GET_DC_OFFSET);
         globals.getForegroundWindow = (PFGetForegroundWindow)((uintptr_t)globals.user32 + GET_FOREGROUND_WINDOW_OFFSET);
         globals.getWindowRect = (PFGetWindowRect)((uintptr_t)globals.user32 + GET_WINDOW_RECT_OFFSET);
         globals.drawText = (PFDrawText)((uintptr_t)globals.gdi32 + DRAW_TEXT_OFFSET);
-
-
+    
+    
         globals.hdc = globals.getDC(NULL);
-
-
+    
+    
     }
-
+    
     globals.drawText(globals.getDC(globals.getForegroundWindow()), 100, 100, 0, nullptr, "THIS COULD BE ANYTHING", 23, nullptr);
-
-    uintptr_t activeWeapon = *(uintptr_t*)((uintptr_t)globals.mod + PLAYER_ACTIVE_WEAPON);
+    
+    SRWeapon* activeWeapon = *(SRWeapon**)((uintptr_t)globals.mod + PLAYER_ACTIVE_WEAPON);
     if (activeWeapon)
     {
-        int* ammo = (int*)(activeWeapon + 0x1E4);
-        *ammo = 99;
+        activeWeapon->ammo = 99;
     }
-
+    
     return state;
 }
